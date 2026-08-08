@@ -8,19 +8,16 @@ from datetime import date, datetime
 
 class Worker:
     def __init__(self):
+        self.holidays = None
         self.url = "https://www.shuyz.com/githubfiles/china-holiday-calender/master/holidayAPI.json"
 
     async def crawl(self):
-        async with httpx.AsyncClient(timeout=1000,
-                                     limits=Limits(max_connections=1000, max_keepalive_connections=1000)) as client:
+        async with httpx.AsyncClient(timeout=10,
+                                     limits=Limits(max_connections=10, max_keepalive_connections=10)) as client:
             response = await client.get(self.url)
             return HolidayCalendar.model_validate(response.json()).years
 
     async def check(self, year: int, month: int, day: int) -> HolidayResult:
-        # 如果数据未缓存，先调用crawl获取数据
-        if not hasattr(self, 'holidays'):
-            self.holidays = await self.crawl()
-
         target_date = date(year, month, day)
         year_str = str(year)
 

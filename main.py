@@ -1,26 +1,13 @@
-from contextlib import asynccontextmanager
 from datetime import date
 
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import Response
 from starlette.middleware.cors import CORSMiddleware
 
-from backend.Worker import Worker
 from backend.SVG import generate_calendar_svg
+from backend.Worker import Worker
 
-_worker: Worker | None = None
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global _worker
-    _worker = Worker()
-    try:
-        await _worker.crawl()
-    except Exception as e:
-        pass
-    yield
-
+_worker: Worker = Worker()
 
 app = FastAPI(
     title="中国节假日月历 SVG API",
@@ -29,7 +16,6 @@ app = FastAPI(
         "节假日数据来源：[china-holiday-calender](https://github.com/lanceliao/china-holiday-calender)"
     ),
     version="2.0.0",
-    lifespan=lifespan,
 )
 
 app.add_middleware(CORSMiddleware,
@@ -38,6 +24,8 @@ app.add_middleware(CORSMiddleware,
                    allow_methods=["*"],  # 允许所有 HTTP 方法
                    allow_headers=["*"],  # 允许所有 HTTP 头部
                    )
+
+
 @app.get(
     "/calendar",
     summary="获取月历 SVG",
@@ -59,13 +47,11 @@ async def get_calendar(
     | 🔵 蓝色背景 | 今天 |
     """
     today = date.today()
+
     y = year if year is not None else today.year
     m = month if month is not None else today.month
-
-    worker = _worker or Worker()
-
     try:
-        svg = await generate_calendar_svg(y, m, worker)
+        svg = await generate_calendar_svg(y, m, _worker)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SVG 生成失败: {e}")
 

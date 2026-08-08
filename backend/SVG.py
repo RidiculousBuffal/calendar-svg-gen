@@ -20,6 +20,8 @@ C = {
     "header":           "#666666",
     "cell_bg":          "#FFFFFF",
     "cell_border":      "#E8E8E8",
+    "weekend_bg":       "#FFF7F7",
+    "weekend_border":   "#F2D6D6",
     "day_text":         "#1a1a2e",
     "other_bg":         "#FAFAFA",
     "other_text":       "#BBBBBB",
@@ -60,7 +62,7 @@ def _text(x, y, content, size, color, anchor="middle", weight="normal", baseline
             f'{content}</text>')
 
 
-async def generate_calendar_svg(year: int, month: int, worker: Worker | None = None) -> str:
+async def generate_calendar_svg(year: int, month: int, worker: Worker) -> str:
     """异步生成指定年月的月历 SVG 字符串，可传入已缓存的 Worker 实例"""
     today = date.today()
     first_day = date(year, month, 1)
@@ -78,8 +80,7 @@ async def generate_calendar_svg(year: int, month: int, worker: Worker | None = N
         cells.append(last + timedelta(days=len(cells) - (first_weekday + days_in_month) + 1))
 
     # 并发查询所有本月日期的节假日状态
-    if worker is None:
-        worker = Worker()
+    worker.holidays = await worker.crawl()
     current_month_dates = [d for d in cells if d.month == month and d.year == year]
     results = await asyncio.gather(
         *[worker.check(d.year, d.month, d.day) for d in current_month_dates]
@@ -137,6 +138,9 @@ async def generate_calendar_svg(year: int, month: int, worker: Worker | None = N
         elif info and info.isCompDay:
             bg, border, day_color = C["comp_bg"], C["comp_border"], C["comp_text"]
             dot, label, label_color = C["comp_dot"], info.name, C["comp_text"]
+        elif d.weekday() >= 5:
+            bg, border, day_color = C["weekend_bg"], C["weekend_border"], C["day_text"]
+            dot, label, label_color = None, None, None
         else:
             bg, border, day_color = C["cell_bg"], C["cell_border"], C["day_text"]
             dot, label, label_color = None, None, None
@@ -161,7 +165,7 @@ async def generate_calendar_svg(year: int, month: int, worker: Worker | None = N
                                label, 12, label_color))
 
     # 图例
-    lx = svg_w - PAD_X - 210
+    lx = svg_w - PAD_X - 280
     ly = svg_h - 18
     parts.append(f'<circle cx="{lx}" cy="{ly - 3}" r="4" fill="{C["hol_dot"]}"/>')
     parts.append(_text(lx + 10, ly, "节假日", 11, C["hol_text"], anchor="start"))
@@ -169,6 +173,8 @@ async def generate_calendar_svg(year: int, month: int, worker: Worker | None = N
     parts.append(_text(lx + 72, ly, "调休补班", 11, C["comp_text"], anchor="start"))
     parts.append(_rect(lx + 140, ly - 11, 12, 12, 3, C["today_bg"], C["today_border"], 1.5))
     parts.append(_text(lx + 156, ly, "今天", 11, C["today_text"], anchor="start"))
+    parts.append(_rect(lx + 198, ly - 11, 12, 12, 3, C["weekend_bg"], C["weekend_border"], 1.5))
+    parts.append(_text(lx + 214, ly, "周末", 11, C["day_text"], anchor="start"))
 
     parts.append("</svg>")
     return "\n".join(parts)
