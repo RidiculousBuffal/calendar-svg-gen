@@ -91,6 +91,8 @@ missing_fields ['isCompDay', 'isWeekend']
 - Consumes: `DayInfo` from `backend.Holiday`；`_worker: Worker`；`Worker.check(year: int, month: int, day: int) -> HolidayResult`。
 - Produces: `GET /day`，查询参数 `date`，响应模型 `DayInfo`。
 
+**注意：** `Worker.check()` 内部直接下标访问 `self.holidays[year_str]`（`backend/Worker.py:25`），`holidays` 为 `None` 时会抛 `TypeError`，因此路由必须先完成加载。
+
 - [ ] **Step 1: 在 `main.py` 的导入区加入 `DayInfo`**
 
 在 `from backend.Worker import Worker` 之前加入：
@@ -98,6 +100,8 @@ missing_fields ['isCompDay', 'isWeekend']
 ```python
 from backend.Holiday import DayInfo
 ```
+
+`main.py` 已导入 `date` 与 `HTTPException`，本步骤不需要新增其它导入。
 
 - [ ] **Step 2: 在 `get_calendar` 之后、`root` 之前新增路由**
 
@@ -137,10 +141,21 @@ async def get_day(
 
 - [ ] **Step 3: 在 `root()` 的 `usage` 中补充接口说明**
 
-在 `"指定年月"` 之后加入：
+保持 `root()` 其余内容不变，仅新增 `"日期查询"` 一行；修改后的完整代码如下（替换原 `root()`）：
 
 ```python
+@app.get("/", summary="API 首页")
+def root():
+    return {
+        "name": "中国节假日月历 SVG API",
+        "version": "2.0.0",
+        "usage": {
+            "当月月历": "GET /calendar",
+            "指定年月": "GET /calendar?year=2026&month=2",
             "日期查询": "GET /day?date=2026-10-01",
+            "交互文档": "GET /docs",
+        },
+    }
 ```
 
 - [ ] **Step 4: 语法检查**
@@ -183,7 +198,12 @@ main._worker.holidays = {
 }
 
 
+async def fail_crawl():
+    raise AssertionError("holidays 已加载时不应调用 crawl()")
+
+
 async def run():
+    main._worker.crawl = fail_crawl
     async with AsyncClient(
         transport=ASGITransport(app=main.app), base_url="http://test"
     ) as client:
@@ -199,8 +219,9 @@ async def run():
             assert response.status_code == 200, (value, response.status_code, response.text)
             assert response.json() == expected, (value, response.json(), expected)
 
-        response = await client.get("/day", params={"date": "2026-13-01"})
-        assert response.status_code == 422, response.status_code
+        for bad in ("2026-13-01", "2026-02-30"):
+            response = await client.get("/day", params={"date": bad})
+            assert response.status_code == 422, (bad, response.status_code)
 
         response = await client.get("/day")
         assert response.status_code == 422, response.status_code
@@ -212,7 +233,9 @@ async def run():
         main._worker.crawl = boom
         response = await client.get("/day", params={"date": "2026-10-01"})
         assert response.status_code == 500, response.status_code
-        assert "节假日数据获取失败" in response.json()["detail"]
+        detail = response.json()["detail"]
+        assert detail.startswith("节假日数据获取失败"), detail
+        assert "network down" in detail, detail
 
     print("smoke ok")
 
@@ -226,6 +249,11 @@ Expected:
 ```text
 smoke ok
 ```
+
+说明：
+
+- `fail_crawl` 替换后仍然通过前 5 个用例，证明「`holidays` 已加载时不重复拉取」的懒加载分支生效。
+- 最后一个用例把 `holidays` 置回 `None`，验证拉取失败时返回 500 且 `detail` 带原因。
 
 ---
 
@@ -322,7 +350,7 @@ Expected:
 2027-01-01 {"isHoliday":false,"isCompDay":false,"isWeekend":false}
 ```
 
-如果外网不可达导致数据拉取失败，记录实际错误；不要将本步骤标记为通过，改以 Task 2 的确定性 smoke 结果作为逻辑验证。
+如果外网不可达导致数据拉取失败，或数据源实际内容与上表不一致，记录实际响应与错误原因；不要将本步骤标记为通过，改以 Task 2 的确定性 smoke 结果作为逻辑验证依据。
 
 - [ ] **Step 4: 验证非法参数与缺失参数返回 422**
 
@@ -330,6 +358,7 @@ Run:
 
 ```bash
 curl -s -o /dev/null -w "invalid=%{http_code}\n" "http://127.0.0.1:8000/day?date=2026-13-01"
+curl -s -o /dev/null -w "nonexistent=%{http_code}\n" "http://127.0.0.1:8000/day?date=2026-02-30"
 curl -s -o /dev/null -w "missing=%{http_code}\n" "http://127.0.0.1:8000/day"
 ```
 
@@ -337,6 +366,7 @@ Expected:
 
 ```text
 invalid=422
+nonexistent=422
 missing=422
 ```
 
@@ -354,7 +384,19 @@ Expected:
 calendar=200
 ```
 
-- [ ] **Step 6: 停止服务并清理测试进程**
+说明：`generate_calendar_svg` 会重新 `crawl()` 数据源，若外网不可达可能返回 500；此时记录为环境问题，并以 Task 2 的 smoke 结果判断 `/day` 是否引入回归。
+
+- [ ] **Step 6: 确认改动范围**
+
+Run:
+
+```bash
+git status --short
+```
+
+Expected: 仅出现 `backend/Holiday.py`、`main.py`、`README.md` 的修改（以及本计划文档本身）；不应出现新增依赖文件。
+
+- [ ] **Step 7: 停止服务并清理测试进程**
 
 停止本任务启动的 uvicorn 进程；不要保留后台服务。
 
@@ -366,12 +408,16 @@ calendar=200
 - `GET /day?date=YYYY-MM-DD`：Task 2。
 - 3 个布尔响应字段：Task 1、Task 2。
 - `isWeekend` 纯星期判定、补班日也 true：Task 2 的 `target_date.weekday() >= 5`。
+- 数据流「已加载则直接查询、未加载才 `crawl()`」：Task 2 Step 5 的 `fail_crawl` 守卫用例。
 - 未收录年份返回 200 且两个 false：Task 2 的 smoke case `2027-01-01`。
-- 非法/缺失日期 422：Task 2 Step 5、Task 4 Step 4。
+- 非法/不存在/缺失日期 422：Task 2 Step 5（`2026-13-01`、`2026-02-30`、无参）、Task 4 Step 4。
 - 数据源失败 500：Task 2 Step 5。
 - 首页 usage 与 README：Task 2 Step 3、Task 3。
 - `/calendar` 与 `Worker.check()` 不变：Global Constraints、Task 4 Step 5。
+- 改动范围与「不新增依赖」：Task 4 Step 6 的 `git status --short`。
 
 **Placeholder scan:** 无 TBD/TODO；所有代码步骤均给出完整代码与命令。
 
-**Type consistency:** `DayInfo` 的三个字段在模型、路由返回与验证用例中命名一致；`Worker.check` 仍返回 `HolidayResult`，路由只读取 `isHoliday`、`isCompDay`。
+**Type consistency:** `DayInfo` 的三个字段在模型、路由返回与验证用例中命名一致；`Worker.check` 仍返回 `HolidayResult`，路由只读取 `isHoliday`、`isCompDay`（`HolidayResult.name` 为必填，但路由不读取、不修改）。
+
+**环境核对（计划编写时实测）：** Python 3.12.3、FastAPI 0.133.0、Pydantic 2.12.5、httpx 0.28.1、uv 0.7.13；`pytest` 未安装，故不新增 `tests/` 套件；Pydantic 2 对 `2026-13-01`、`2026-02-30` 均判为非法日期。
