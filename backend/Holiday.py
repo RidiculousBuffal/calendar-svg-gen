@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field, HttpUrl, ConfigDict
 
 
@@ -28,6 +28,16 @@ class HolidayCalendar(BaseModel):
 
 class HolidayResult(BaseModel):
     isHoliday: bool = False
-    name:str
+    name: str
     # 是否补班，如果是，那么name 同步变为 春节补班
     isCompDay: bool = False
+
+
+class DayDetail(BaseModel):
+    date: str = Field(description="查询日期 (YYYY-MM-DD)")
+    isHoliday: bool = Field(description="是否是节假日（放假）")
+    isWeekend: bool = Field(description="是否是周末")
+    holidayName: Optional[str] = Field(None, description="节假日名称（若非节假日为 null，补班日为如'春节补班'）")
+    isWorkday: bool = Field(description="是否上班")
+    isCompDay: bool = Field(False, description="是否调休补班")
+

@@ -8,5 +8,6 @@ dependencies = [
     "fastapi>=0.133.0",
     "httpx>=0.28.1",
     "pydantic>=2.12.5",
+    "socksio>=1.0.0",
     "uvicorn>=0.41.0",
 ]

@@ -79,8 +79,8 @@ async def generate_calendar_svg(year: int, month: int, worker: Worker) -> str:
     while len(cells) < 42:
         cells.append(last + timedelta(days=len(cells) - (first_weekday + days_in_month) + 1))
 
-    # 并发查询所有本月日期的节假日状态
-    worker.holidays = await worker.crawl()
+    # 确保节假日数据已加载
+    await worker.ensure_data()
     current_month_dates = [d for d in cells if d.month == month and d.year == year]
     results = await asyncio.gather(
         *[worker.check(d.year, d.month, d.day) for d in current_month_dates]
